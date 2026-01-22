@@ -25,10 +25,14 @@ jobs:
         with:
           node-version: "20"
           cache: 'npm'
+      
+      # 👇👇👇 修复点：使用 npm install 而不是 npm ci 👇👇👇
       - name: Install dependencies
-        run: npm ci
+        run: npm install
+
       - name: Build
         run: npm run build
+        
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
