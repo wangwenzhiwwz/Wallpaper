@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>壁纸画廊 (Wallpaper Gallery)</title>
+    <style>
+        /* 基础重置与变量 */
+        :root {
+            --bg-color: #121212;
+            --text-color: #ffffff;
+            --accent-color: #007bff;
+        }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }
+        h1 { text-align: center; margin-bottom: 30px; font-weight: 300; letter-spacing: 2px;}
+
+        /* 自适应瀑布流布局 (CSS Columns) */
+        .masonry-gallery {
+            column-count: 5;
+            column-gap: 15px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        @media (max-width: 1200px) { .masonry-gallery { column-count: 4; } }
+        @media (max-width: 900px) { .masonry-gallery { column-count: 3; } }
+        @media (max-width: 600px) { .masonry-gallery { column-count: 2; } }
+
+        .gallery-item {
+            break-inside: avoid;
+            margin-bottom: 15px;
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+
+        .gallery-item:hover {
+            transform: scale(1.02);
+        }
+
+        .gallery-item img {
+            width: 100%;
+            display: block;
+            border-radius: 12px;
+        }
+
+        /* 悬浮遮罩层 (Overlay) */
+        .overlay {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            background: linear-gradient(transparent, rgba(0,0,0,0.8));
+            padding: 20px 10px 10px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .gallery-item:hover .overlay { opacity: 1; }
+
+        .filename-text {
+            font-size: 12px;
+            color: #ccc;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 70%;
+        }
+
+        .download-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            text-decoration: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            backdrop-filter: blur(4px);
+        }
+        .download-btn:hover { background: var(--accent-color); }
+
+        /* 快速预览模态框 (Lightbox Modal) */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
+        }
+        .modal.active { display: flex; }
+        .modal img { max-height: 90vh; max-width: 90vw; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .close-modal {
+            position: absolute;
+            top: 20px; right: 30px;
+            color: white;
+            font-size: 40px;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .close-modal:hover { color: #ccc; }
+        
+        /* 加载提示样式 */
+        #loading {
+            text-align: center;
+            color: #888;
+            font-size: 18px;
+            margin-top: 50px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Wallpaper Gallery</h1>
+    <div id="loading">正在读取壁纸列表... (Loading...)</div>
+    <div class="masonry-gallery" id="gallery"></div>
+
+    <div class="modal" id="previewModal">
+        <span class="close-modal" id="closeBtn">&times;</span>
+        <img id="previewImage" src="" alt="Preview">
+    </div>
+
+    <script>
+        const galleryContainer = document.getElementById('gallery');
+        const loadingDiv = document.getElementById('loading');
+        
+        // 关键配置：图片目录指向 Wallpaper 文件夹
+        const IMAGE_DIRECTORY = './Wallpaper/'; 
+
+        // 1. 使用 Fetch API 自动读取 list.txt
+        fetch('list.txt')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('网络响应失败，请检查 list.txt 是否存在。');
+                }
+                return response.text();
+            })
+            .then(rawText => {
+                // 隐藏加载提示
+                loadingDiv.style.display = 'none';
+
+                // 2. 自动清洗并转换为数组
+                const fileNames = rawText
+                    .split('\n')
+                    .map(name => name.trim())
+                    // 过滤掉空行、可能误入的 list.txt 或 index.html
+                    .filter(name => name !== '' && name !== 'list.txt' && name !== 'index.html'); 
+
+                // 3. 解析文件名为日期对象的函数
+                function parseDateFromName(filename) {
+                    const regex = /(\d{4})[-_](\d{1,2})[-_](\d{1,2})/;
+                    const match = filename.match(regex);
+                    if (match) {
+                        return new Date(match[1], match[2] - 1, match[3]).getTime();
+                    }
+                    return 0; 
+                }
+
+                // 4. 按照时间降序排序 (最新的在前)
+                const sortedFiles = fileNames.sort((a, b) => {
+                    return parseDateFromName(b) - parseDateFromName(a);
+                });
+
+                // 5. 渲染 DOM (使用 DocumentFragment 优化海量图片的渲染性能)
+                const fragment = document.createDocumentFragment(); 
+                
+                sortedFiles.forEach(filename => {
+                    const imgSrc = IMAGE_DIRECTORY + filename;
+                    
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'gallery-item';
+                    
+                    const img = document.createElement('img');
+                    img.src = imgSrc;
+                    img.loading = 'lazy'; 
+                    
+                    const overlay = document.createElement('div');
+                    overlay.className = 'overlay';
+                    
+                    const titleSpan = document.createElement('span');
+                    titleSpan.className = 'filename-text';
+                    titleSpan.textContent = filename;
+                    
+                    const downloadBtn = document.createElement('a');
+                    downloadBtn.className = 'download-btn';
+                    downloadBtn.href = imgSrc;
+                    downloadBtn.download = filename; 
+                    downloadBtn.textContent = '下载';
+                    downloadBtn.onclick = (e) => e.stopPropagation(); 
+                    
+                    overlay.appendChild(titleSpan);
+                    overlay.appendChild(downloadBtn);
+                    itemDiv.appendChild(img);
+                    itemDiv.appendChild(overlay);
+                    
+                    itemDiv.onclick = () => openPreview(imgSrc);
+                    fragment.appendChild(itemDiv);
+                });
+                
+                galleryContainer.appendChild(fragment);
+            })
+            .catch(error => {
+                loadingDiv.style.color = '#ff4444';
+                loadingDiv.innerHTML = `读取失败！<br><br>由于浏览器的安全限制 (CORS)，不能直接双击打开本地 HTML 文件。<br>请部署到 GitHub Pages 或使用 <b>VS Code 的 Live Server 插件</b> 运行。<br><br>详细错误：${error.message}`;
+                console.error('Fetch error:', error);
+            });
+
+        // 6. 模态框逻辑 (Lightbox)
+        const modal = document.getElementById('previewModal');
+        const previewImg = document.getElementById('previewImage');
+        const closeBtn = document.getElementById('closeBtn');
+
+        function openPreview(src) {
+            previewImg.src = src;
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden'; 
+        }
+
+        function closePreview() {
+            modal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        closeBtn.onclick = closePreview;
+        modal.onclick = (e) => {
+            if (e.target === modal) closePreview(); 
+        };
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closePreview();
+        });
+    </script>
+</body>
+</html>
